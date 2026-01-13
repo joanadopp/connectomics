@@ -1,0 +1,232 @@
+---
+title: "synapses_by_roi"
+output: html_document
+date: "2024-05-31"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r libraries}
+library(neuronbridger)
+library(neuprintr)
+library(dplyr)
+library(purrr)
+library(data.table)
+library(ggplot2)
+```
+
+```{r}
+driver_list <- c("MB441B", "MB042B", "MB196B", "MB315C", "MB312B", "MB607B", "MB009B", "MB112C", "MB298B", "MB504B", "MB320C", "MB025B", "MB188B", "MB463B", "MB418B", "MB185B", "MB008B", "MB371B")
+```
+
+```{r}
+conn = neuprintr::neuprint_login(server= "https://neuprint.janelia.org/",
+                                 dataset= "hemibrain:v1.2.1",
+   token= "xxx")
+```
+
+1. Get cell IDs for all drivers into same df
+a. loop through lines with neuronbridge to get cell IDs
+```{r}
+
+# Function to get data for each line
+get_line_contents <- function(line) {
+  result <- safely(neuronbridge_line_contents)(line = line, threshold = 0)
+  if (!is.null(result$error)) {
+    message(paste("Error for line:", line, "- skipping"))
+    return(NULL)
+  }
+  return(result$result)
+}
+
+line_contents <- driver_list %>%
+  map(get_line_contents) %>%
+  compact() %>%
+  bind_rows()
+```
+
+```{r}
+line_contents_sub <- line_contents[, c("bodyid", "searched", "name", "type")]
+```
+
+b. filter neuronbridge output
+I used no threshold, so that I don't miss hits (would need to determine threshold by line and it's arbitrary). I want to remove false positives by removing those cells that project into unwanted neuropil.
+get list of names associated with each line and filter by the column 'name' the ones that are relevant
+```{r}
+target_ROI <- line_contents_sub %>%
+  group_by(searched) %>%
+  summarise(values = paste(name, collapse = ', '))
+```
+
+```{r}
+#filtering cell IDs by name column to get only cells projecting into the relevant compartments for each driver
+filtered <- line_contents_sub %>%
+  filter(!(searched == "MB441B" & !(grepl("PAM", name) & grepl("y3", name)) & !(is.na(name)))) %>%
+  filter(!(searched == "MB042B" & !(grepl("PAM", name) & grepl("y3", name)) & !(is.na(name)))) %>%
+  filter(!(searched == "MB196B" & !(grepl("PAM", name)))) %>%
+  filter(!(searched == "MB315C" & !(grepl("PAM", name) & grepl("y5", name)) & !(is.na(name)))) %>%
+  filter(!(searched == "MB312B" & !(grepl("PAM", name) & grepl("y4", name)) & !(is.na(name)))) %>%
+  filter(!(searched == "MB607B" & !(grepl("KCg", name)))) %>%
+  filter(!(searched == "MB320C" & !is.na(name))) %>%
+  filter(!(searched == "MB025B" & !(grepl("PAM", name) & grepl("B'1", name)) & !(is.na(name)))) %>%
+  filter(!(searched == "MB418B" & !(grepl("KC", name)))) %>%
+  filter(!(searched == "MB371B" & !(grepl("KC", name)) & !(is.na(name)))) %>%
+  filter(!(searched == "MB188B" & !(grepl("PAM", name) & grepl("y3", name)) & !(is.na(name)))) %>%
+  filter(!(searched == "MB047B" & !(grepl("PAM", name) & grepl("B'2", name)) & !(is.na(name)))) %>%
+  filter(!(searched == "MB112C" & !(grepl("MBON", name)))) %>%
+  filter(!(searched == "MB298B" & !(grepl("MBON", name))))
+```
+
+2. get info on number of synapses per cell ID in ROI
+```{r}
+#available ROIs
+neuprint_ROIs(fromNeuronFields=T, superLevel = NULL)
+```
+
+```{r}
+output_ROIs = c("g1(R)", "g2(R)", "g3(R)", "g4(R)", "g5(R)", "a'1(R)", "a'2(R)", "a'3(R)", "a1(R)", "a2(R)", "a3(R)", "b'1(R)", "b'2(R)", "b1(R)", "b2(R)")
+```
+
+per ROI, what cell IDs have synapses there?
+```{r}
+get_ROI_contents <- function(ROI) {
+  result <- neuprint_bodies_in_ROI(ROI)
+  # adding a column with ROI to the result
+  result$ROI <- ROI
+  return(result)
+}
+
+ROI_contents <- output_ROIs %>%
+  map(get_ROI_contents) %>%
+  compact() %>%
+  bind_rows()
+```
+
+3. merge the dfs: result is a table with each bodyid matched to a driver line
+```{r}
+ids <- merge(filtered, ROI_contents, by="bodyid")
+```
+
+```{r}
+ids <- ids %>%
+  rename(line = searched)
+```
+
+add extra column ct by line
+```{r}
+df_all <- ids %>%
+  left_join(drivers, by = "line")
+```
+
+```{r}
+summary <- df_all %>%
+  group_by(ROI, line, individual_astro, ct, ncell) %>%
+  summarize(
+    roipre_sum = sum(roipre),             
+    roipre_avg = mean(roipre),
+    roipre_med = median(roipre),
+    roipre_count = n(),                   
+    .groups = 'drop'
+  ) %>%
+  mutate(avg_n = roipre_avg * ncell)
+```
+
+```{r}
+final <- summary %>%
+  filter(!(line == "MB441B" & !(ROI == "g3(R)"))) %>%
+  filter(!(line == "MB196B" & !(ROI == "g4(R)"))) %>%
+  filter(!(line == "MB315C" & !(ROI == "g5(R)"))) %>%
+  filter(!(line == "MB312B" & !(ROI == "g4(R)"))) %>%
+  filter(!(line == "MB607B" & !(ROI %in% c("g1(R)", "g2(R)", "g3(R)", "g4(R)", "g5(R)")))) %>%
+  filter(!(line == "MB025B" & !(ROI == "b'1(R)"))) %>%
+  filter(!(line == "MB418B" & !(ROI %in% c("b'1(R)", "b'2(R)", "a'1(R)", "a'2(R)", "a'3(R)")))) %>%
+  filter(!(line == "MB188B" & !(ROI == "g3(R)"))) %>%
+  filter(!(line == "MB047B")) %>%
+  filter(!(line == "MB112C" & !(ROI %in% c("b1(R)", "b2(R)", "a1(R)", "a2(R)", "a3(R)")))) %>%
+  filter(!(line == "MB298B" & !(ROI %in% c("g1(R)", "g2(R)")))) %>%
+  filter(!(line == "MB504B" & !(ROI %in% c("g1(R)", "g2(R)", "a'1(R)", "a2(R)", "a'2(R)", "a3(R)"))))
+```
+
+```{r}
+final$ROI <- gsub("\\(R\\)", "", final$ROI)
+final$ROI <- factor(final$ROI, levels = c("g1", "g2", "g3", "g4", "g5", "a'1", "a'2", "a'3", "b'1", "b'2", "a1", "a2", "a3", "b1", "b2"))
+```
+
+```{r}
+setDT(final)
+# Assume dt is your data.table
+line_ct <- unique(final[, .(line, ct)])
+
+# Base colors for each category
+#base_colors <- c(KC = "red", MBON = "blue", PPL1 = "purple", PAM = "green")
+
+# Generate shades
+kc_lines   <- line_ct[ct == "KC", line]
+kc_colors  <- c("#d62728", "#ff9896")
+#lighten(rep(base_colors["KC"], length(kc_lines)), amount = seq(0.2, 0.5, length.out = length(kc_lines)))
+
+mbon_lines  <- line_ct[ct == "MBON", line]
+mbon_colors <- c("#ff7f0e", "#ffbb78")
+
+ppl1_lines  <- line_ct[ct == "PPL1", line]
+ppl1_colors <- "#2ca02c"
+
+pam_lines  <- line_ct[ct == "PAM", line]
+pam_colors <- c("#440381", "#9467bd", "#6b6ecf", "#17becf", "#9edae5", "#1f77b4")
+
+# Combine into one named vector
+line_colors <- setNames(
+  c(kc_colors, mbon_colors, ppl1_colors, pam_colors),
+  c(kc_lines, mbon_lines, ppl1_lines, pam_lines)
+)
+
+# View final mapping
+line_colors
+
+```
+
+```{r}
+ct_order <- c("KC", "MBON", "PPL1", "PAM")
+line_ct[, ct := factor(ct, levels = ct_order)]
+setorder(line_ct, ct)  # Now sorted by ct, then line
+line_levels_ordered <- line_ct$line  # ordered by ct
+
+# Apply to original dt
+final[, line := factor(line, levels = line_levels_ordered)]
+
+```
+
+exploring plots
+-- make plot with geom_polygon for yes/no, color the ct and shape for different lines --> no text in plot
+```{r}
+driver_plot <- ggplot(final, aes(x=ROI, y=log2(avg_n), color=line)) + 
+  geom_vline(xintercept = unique(final$ROI), color="grey", linetype="dotted", linewidth=0.3) +
+  geom_point(aes(size=roipre_count, shape=individual_astro), stroke=1.5) +
+  #geom_polygon(data=hull, alpha=0.5) +
+  #stat_ellipse(aes(group = individual_astro), type = "norm", level=0.8) +
+  #geom_text(aes(label=line), vjust=-1) +
+  #geom_hline(yintercept=log2(770), linetype="dashed", linewidth=0.7, color="grey") +
+  guides(size=guide_legend(override.aes = list(shape=c(3))),
+         col=guide_legend(override.aes = list(shape=c(3))))+
+  theme_classic() +
+  #guides(color = guide_legend(override.aes = aes(label = "")))+
+  scale_color_manual(values = line_colors) +
+  scale_shape_manual(values = c(4, 3))+
+  scale_size_continuous(limits=c(1,43), breaks=c(1,10,20,30,40))+
+  theme(legend.box = "horizontal") +
+  ylab("log2(estimated synapse number)") +
+  xlab("Mushroom Body compartment")
+
+ggsave(driver_plot, filename="/Users/u0118120/FlySleepLab Dropbox/Joana/astro_paper/250530_fig2m.svg", height = 4, width = 7, dpi=300)
+```
+
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
