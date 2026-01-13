@@ -161,17 +161,12 @@ final$ROI <- factor(final$ROI, levels = c("g1", "g2", "g3", "g4", "g5", "a'1", "
 ```
 
 ```{r}
+#creating different shades of same colour per cell type category
 setDT(final)
-# Assume dt is your data.table
 line_ct <- unique(final[, .(line, ct)])
 
-# Base colors for each category
-#base_colors <- c(KC = "red", MBON = "blue", PPL1 = "purple", PAM = "green")
-
-# Generate shades
 kc_lines   <- line_ct[ct == "KC", line]
 kc_colors  <- c("#d62728", "#ff9896")
-#lighten(rep(base_colors["KC"], length(kc_lines)), amount = seq(0.2, 0.5, length.out = length(kc_lines)))
 
 mbon_lines  <- line_ct[ct == "MBON", line]
 mbon_colors <- c("#ff7f0e", "#ffbb78")
@@ -188,7 +183,6 @@ line_colors <- setNames(
   c(kc_lines, mbon_lines, ppl1_lines, pam_lines)
 )
 
-# View final mapping
 line_colors
 
 ```
@@ -204,20 +198,14 @@ final[, line := factor(line, levels = line_levels_ordered)]
 
 ```
 
-exploring plots
--- make plot with geom_polygon for yes/no, color the ct and shape for different lines --> no text in plot
+
 ```{r}
 driver_plot <- ggplot(final, aes(x=ROI, y=log2(avg_n), color=line)) + 
   geom_vline(xintercept = unique(final$ROI), color="grey", linetype="dotted", linewidth=0.3) +
   geom_point(aes(size=roipre_count, shape=individual_astro), stroke=1.5) +
-  #geom_polygon(data=hull, alpha=0.5) +
-  #stat_ellipse(aes(group = individual_astro), type = "norm", level=0.8) +
-  #geom_text(aes(label=line), vjust=-1) +
-  #geom_hline(yintercept=log2(770), linetype="dashed", linewidth=0.7, color="grey") +
   guides(size=guide_legend(override.aes = list(shape=c(3))),
          col=guide_legend(override.aes = list(shape=c(3))))+
   theme_classic() +
-  #guides(color = guide_legend(override.aes = aes(label = "")))+
   scale_color_manual(values = line_colors) +
   scale_shape_manual(values = c(4, 3))+
   scale_size_continuous(limits=c(1,43), breaks=c(1,10,20,30,40))+
@@ -225,7 +213,7 @@ driver_plot <- ggplot(final, aes(x=ROI, y=log2(avg_n), color=line)) +
   ylab("log2(estimated synapse number)") +
   xlab("Mushroom Body compartment")
 
-ggsave(driver_plot, filename="/Users/u0118120/FlySleepLab Dropbox/Joana/astro_paper/250530_fig2m.svg", height = 4, width = 7, dpi=300)
+ggsave(driver_plot, filename="/file/path/x.svg", height = 4, width = 7, dpi=300)
 ```
 
 
